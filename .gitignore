@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+
+# ML artifacts
+*.pkl
+*.joblib
+*.pt
+*.pth
+*.h5
+artifacts/
+models/
+media/
+
+# Django
+db.sqlite3
+.env

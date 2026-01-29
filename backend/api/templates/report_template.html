@@ -1,0 +1,305 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @page {
+        size: A4;
+        margin: 1cm;
+      }
+      body {
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 10pt;
+        color: #374151;
+      }
+
+      /* Layout Tables */
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      td {
+        vertical-align: top;
+      }
+
+      /* Main Container Table (Sidebar vs Content) */
+      .layout-table td.sidebar-cell {
+        width: 30%;
+        background-color: #f4f6f9;
+        padding: 15px;
+        border-right: 1px solid #e1e4e8;
+      }
+      .layout-table td.content-cell {
+        width: 70%;
+        padding: 20px;
+      }
+
+      /* Branding */
+      .logo {
+        font-size: 24pt;
+        font-weight: bold;
+        color: #1e3a8a;
+      }
+      .subtitle {
+        font-size: 10pt;
+        color: #6b7280;
+        text-transform: uppercase;
+        margin-bottom: 20px;
+      }
+
+      /* Sidebar Items */
+      .meta-label {
+        font-size: 8pt;
+        color: #9ca3af;
+        font-weight: bold;
+        text-transform: uppercase;
+        margin-top: 15px;
+      }
+      .meta-value {
+        font-size: 10pt;
+        color: #1f2937;
+        font-weight: bold;
+      }
+
+      /* Badges */
+      .badge {
+        padding: 4px 8px;
+        color: white;
+        font-size: 9pt;
+        border-radius: 4px;
+      }
+      .bg-green {
+        background-color: #16a34a;
+      }
+      .bg-orange {
+        background-color: #f97316;
+      }
+
+      /* Result Box */
+      .result-box {
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        color: white;
+      }
+      .box-red {
+        background-color: #dc2626;
+      }
+      .box-green {
+        background-color: #16a34a;
+      }
+      .result-title {
+        font-size: 18pt;
+        font-weight: bold;
+        margin: 10px 0;
+      }
+
+      /* Progress Bar (Table Implementation) */
+      .progress-table {
+        width: 100%;
+        margin-top: 5px;
+        border: 1px solid white;
+      }
+      .progress-table td {
+        height: 6px;
+        padding: 0;
+      }
+
+      /* Data Tables */
+      .section-header {
+        color: #1e3a8a;
+        font-size: 14pt;
+        font-weight: bold;
+        border-bottom: 2px solid #e5e7eb;
+        margin-top: 25px;
+        margin-bottom: 10px;
+      }
+      .data-row td {
+        padding: 6px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      .data-row th {
+        padding: 6px;
+        background-color: #f3f4f6;
+        text-align: left;
+        color: #4b5563;
+      }
+
+      /* Dots */
+      .dot {
+        font-size: 16pt;
+        line-height: 10pt;
+      }
+      .c-red {
+        color: #dc2626;
+      }
+      .c-green {
+        color: #16a34a;
+      }
+
+      .footer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        color: #9ca3af;
+        font-size: 8pt;
+        padding-top: 10px;
+        border-top: 1px solid #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <table class="layout-table">
+      <tr>
+        <!-- SIDEBAR COLUMN -->
+        <td class="sidebar-cell">
+          <div class="logo">ImmunoAI</div>
+          <div class="subtitle">Diagnostic Report</div>
+
+          <div class="meta-label">Patient Name</div>
+          <div class="meta-value">{{ patient_name }}</div>
+
+          <div class="meta-label">Patient ID</div>
+          <div class="meta-value">#{{ patient_id }}</div>
+
+          <div class="meta-label">Date</div>
+          <div class="meta-value">{{ date }}</div>
+
+          <div class="meta-label">Session ID</div>
+          <div class="meta-value">{{ session_id }}</div>
+
+          <div class="meta-label">Status</div>
+          <div style="margin-top: 5px">
+            <span
+              class="badge {% if status == 'VERIFIED' %}bg-green{% else %}bg-orange{% endif %}"
+            >
+              {{ status }}
+            </span>
+          </div>
+
+          {% if doctor_notes %}
+          <div class="meta-label">Doctor's Note</div>
+          <div
+            style="
+              font-size: 9pt;
+              font-style: italic;
+              margin-top: 5px;
+              color: #4b5563;
+            "
+          >
+            "{{ doctor_notes }}"
+          </div>
+          {% endif %}
+        </td>
+
+        <!-- MAIN CONTENT COLUMN -->
+        <td class="content-cell">
+          <div class="section-header" style="margin-top: 0">AI Analysis</div>
+
+          <!-- Result Box -->
+          <div
+            class="result-box {% if 'Normal' in result %}box-green{% else %}box-red{% endif %}"
+          >
+            <div style="font-size: 9pt; opacity: 0.9">
+              PREDICTION MODEL OUTPUT
+            </div>
+            <div class="result-title">{{ result }}</div>
+
+            <div style="font-size: 10pt">Confidence: {{ confidence }}%</div>
+
+            <!-- Compatible Progress Bar -->
+            <table class="progress-table" cellspacing="0" cellpadding="0">
+              <tr>
+                <td
+                  width="{{ confidence }}%"
+                  style="background-color: white"
+                ></td>
+                <td width="1%" style="background-color: transparent"></td>
+                <!-- Spacer to prevent collapse -->
+                <td></td>
+              </tr>
+            </table>
+
+            <div
+              style="
+                margin-top: 15px;
+                font-size: 10pt;
+                border-top: 1px solid #ffffffaa;
+                padding-top: 10px;
+              "
+            >
+              {{ explanation }}
+            </div>
+          </div>
+
+          <!-- Clinical Table -->
+          <div class="section-header">Biomarker Profile</div>
+          <table cellspacing="0">
+            <tr class="data-row">
+              <th>Indicator</th>
+              <th>Value</th>
+              <th>Status</th>
+            </tr>
+            {% for item in formatted_clinical_data %}
+            <tr class="data-row">
+              <td>{{ item.name }}</td>
+              <td>{{ item.value }}</td>
+              <td>
+                <span
+                  class="dot {% if item.status_color == 'dot-red' %}c-red{% else %}c-green{% endif %}"
+                  >•</span
+                >
+                {{ item.status_label }}
+              </td>
+            </tr>
+            {% endfor %}
+          </table>
+
+          <!-- Imaging -->
+          {% if grad_cam_path %}
+          <div class="section-header">Neuro-Imaging (Grad-CAM)</div>
+          <div
+            style="
+              text-align: center;
+              background-color: #000;
+              padding: 10px;
+              border-radius: 5px;
+            "
+          >
+            <img src="{{ grad_cam_path }}" style="width: 300px; height: auto" />
+          </div>
+          <div
+            style="
+              text-align: center;
+              font-size: 9pt;
+              color: #6b7280;
+              margin-top: 5px;
+              font-style: italic;
+            "
+          >
+            Figure 1: Attention heatmap.
+          </div>
+          {% endif %}
+
+          <!-- Disclaimer -->
+          <div
+            style="
+              margin-top: 40px;
+              font-size: 8pt;
+              color: #9ca3af;
+              text-align: justify;
+              border-top: 1px solid #e5e7eb;
+              padding-top: 10px;
+            "
+          >
+            <strong>DISCLAIMER:</strong> This report is computer-generated by
+            ImmunoAI. It is not a final medical diagnosis.
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <div class="footer">Generated by ImmunoAI System</div>
+  </body>
+</html>

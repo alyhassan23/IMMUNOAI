@@ -1,0 +1,23 @@
+# Core Framework
+django>=5.0
+djangorestframework
+django-cors-headers
+
+# Database
+psycopg2-binary
+
+# AI & Data Science
+numpy
+pandas
+scikit-learn
+xgboost
+lightgbm
+torch
+torchvision
+opencv-python
+pillow
+shap
+
+# Utilities
+python-dotenv
+requests
