@@ -58,7 +58,7 @@ def register_user(request):
     user.save()
     return Response({"status": "success", "message": "User created successfully"})
 
-api_view(['POST'])
+@api_view(['POST']) # Fixed missing @ symbol
 @permission_classes([AllowAny])
 def update_doctor_detail(request):
     email = request.data.get('email')
@@ -82,24 +82,48 @@ def update_doctor_detail(request):
         profile.save()
         return Response({"status": "success"})
     except User.DoesNotExist:
-        return Response({"error": "User not found"}, status=404)@api_view(['POST'])
+        return Response({"error": "User not found"}, status=404)
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_email(request):
+    email = request.data.get('email')
+    if User.objects.filter(email=email).exists():
+        return Response({"status": "success", "message": "Email found"})
+    return Response({"error": "Email address not found"}, status=404)
+
+    
+@api_view(['POST'])
 @permission_classes([AllowAny])
 def login_user(request):
-    username = request.data.get('email')
+    email = request.data.get('email')
     password = request.data.get('password')
-    user = authenticate(username=username, password=password)
     
-    if user is not None:
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'role': 'doctor' if user.is_doctor else 'patient',
-            'user_id': user.id,
-            'name': f"{user.first_name} {user.last_name}"
-        })
-    else:
-        return Response({"error": "Invalid credentials"}, status=401)
+    if not email or not password:
+        return Response({'error': 'Please provide both email and password'}, status=400)
+
+    # Robust Login: Find by Email first, then check password
+    # This works even if the 'username' column is different from 'email'
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return Response({'error': 'Invalid credentials'}, status=401)
+
+    if not user.check_password(password):
+        return Response({'error': 'Invalid credentials'}, status=401)
+    
+    if not user.is_active:
+        return Response({'error': 'Account is disabled'}, status=401)
+
+    # Generate Tokens
+    refresh = RefreshToken.for_user(user)
+    return Response({
+        'refresh': str(refresh),
+        'access': str(refresh.access_token),
+        'role': 'doctor' if user.is_doctor else 'patient',
+        'user_id': user.id,
+        'name': f"{user.first_name} {user.last_name}"
+    })
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

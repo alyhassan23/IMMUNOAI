@@ -5,6 +5,9 @@ export default {
     extend: {
       animation: {
         blob: "blob 7s infinite",
+        shimmer: "shimmer 1.5s infinite",
+        scan: "scan 3s linear infinite",
+        widthGrow: "widthGrow 2s ease-out forwards",
       },
       keyframes: {
         blob: {
@@ -21,8 +24,35 @@ export default {
             transform: "translate(0px, 0px) scale(1)",
           },
         },
+        shimmer: {
+          "100%": {
+            transform: "translateX(100%)",
+          },
+        },
+        scan: {
+          "0%": { top: "0%", opacity: "0" },
+          "10%": { opacity: "1" },
+          "90%": { opacity: "1" },
+          "100%": { top: "100%", opacity: "0" },
+        },
+        widthGrow: {
+          "0%": { width: "0%" },
+        },
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // This plugin adds the animation-delay utilities needed for the blobs
+    function ({ addUtilities }) {
+      const newUtilities = {
+        ".animation-delay-2000": {
+          "animation-delay": "2s",
+        },
+        ".animation-delay-4000": {
+          "animation-delay": "4s",
+        },
+      };
+      addUtilities(newUtilities);
+    },
+  ],
 };

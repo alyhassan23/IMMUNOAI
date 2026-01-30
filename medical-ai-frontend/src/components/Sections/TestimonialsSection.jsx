@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Quote,
+  Star,
+  BadgeCheck,
+} from "lucide-react";
 
 const TestimonialsSection = () => {
   const testimonials = [
@@ -10,11 +16,7 @@ const TestimonialsSection = () => {
       author: "Dr. Sarah Ahmed",
       role: "Neurologist, Mayo Hospital",
       initials: "SA",
-      theme: {
-        bg: "bg-blue-100",
-        text: "text-blue-600",
-        quote: "text-blue-100",
-      },
+      color: "from-blue-400 to-cyan-400",
     },
     {
       id: 2,
@@ -23,11 +25,7 @@ const TestimonialsSection = () => {
       author: "Dr. Ali Raza",
       role: "Immunologist, PKLI",
       initials: "AR",
-      theme: {
-        bg: "bg-purple-100",
-        text: "text-purple-600",
-        quote: "text-purple-100",
-      },
+      color: "from-purple-400 to-pink-400",
     },
     {
       id: 3,
@@ -36,137 +34,161 @@ const TestimonialsSection = () => {
       author: "Dr. Elena Rodriguez",
       role: "Head of Diagnostics, CareOne",
       initials: "ER",
-      theme: {
-        bg: "bg-emerald-100",
-        text: "text-emerald-600",
-        quote: "text-emerald-100",
-      },
+      color: "from-emerald-400 to-teal-400",
     },
   ];
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
-  // Auto-advance
+  // Auto-advance logic
   useEffect(() => {
     let interval;
     if (!isPaused) {
       interval = setInterval(() => {
         setCurrentIndex((prev) => (prev + 1) % testimonials.length);
-      }, 5000); // Change slide every 5 seconds
+      }, 6000);
     }
     return () => clearInterval(interval);
   }, [isPaused, testimonials.length]);
 
-  const goToSlide = (index) => {
-    setCurrentIndex(index);
-    setIsPaused(true); // Pause temporarily on interaction
-    setTimeout(() => setIsPaused(false), 10000); // Resume after 10s
-  };
-
-  const prevSlide = () => {
-    setCurrentIndex(
-      (prev) => (prev - 1 + testimonials.length) % testimonials.length
-    );
+  const handleManualChange = (direction) => {
     setIsPaused(true);
-    setTimeout(() => setIsPaused(false), 10000);
-  };
-
-  const nextSlide = () => {
-    setCurrentIndex((prev) => (prev + 1) % testimonials.length);
-    setIsPaused(true);
+    if (direction === "next") {
+      setCurrentIndex((prev) => (prev + 1) % testimonials.length);
+    } else {
+      setCurrentIndex(
+        (prev) => (prev - 1 + testimonials.length) % testimonials.length,
+      );
+    }
+    // Resume auto-play after 10 seconds of inactivity
     setTimeout(() => setIsPaused(false), 10000);
   };
 
   return (
-    <section className="py-24 bg-gray-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <h2 className="text-3xl font-extrabold text-center text-gray-900 mb-16">
-          Trusted by Professionals
-        </h2>
+    <section className="relative py-24 bg-slate-50 overflow-hidden">
+      {/* Background Decor */}
+      <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-100/50 rounded-full blur-[100px] pointer-events-none"></div>
+      <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-100/50 rounded-full blur-[100px] pointer-events-none"></div>
 
-        <div className="relative max-w-4xl mx-auto">
-          {/* Carousel Container */}
-          <div className="overflow-hidden relative min-h-[350px] md:min-h-[300px]">
-            {testimonials.map((testimonial, index) => (
-              <div
-                key={testimonial.id}
-                className={`absolute w-full transition-all duration-500 ease-in-out transform ${
-                  index === currentIndex
-                    ? "opacity-100 translate-x-0 z-10"
-                    : "opacity-0 translate-x-8 z-0"
-                }`}
-                // Using a simple fade/slide effect. Only the active one is fully visible.
-                style={{ display: index === currentIndex ? "block" : "none" }}
-                // Note: 'display: none' prevents layout shifts but breaks transition.
-                // For a smooth transition, we remove display:none and use opacity/absolute positioning logic below:
-              >
-                {/* To fix the transition we actually keep them all in DOM but hide non-active */}
-              </div>
-            ))}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        {/* Header */}
+        <div className="text-center mb-16">
+          <div className="inline-flex items-center px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold tracking-widest uppercase mb-4 border border-blue-100">
+            Trusted by Professionals
+          </div>
+          <h2 className="text-4xl font-extrabold text-slate-900">
+            Hear from our{" "}
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600">
+              Partners
+            </span>
+          </h2>
+        </div>
 
-            {/* Re-rendering approach for simpler React transition without external libraries */}
-            <div className="bg-white p-10 rounded-2xl shadow-sm border border-gray-100 relative mx-4 md:mx-12 transition-all duration-300">
-              <div
-                className={`absolute top-8 right-8 text-6xl ${testimonials[currentIndex].theme.quote} font-serif leading-none`}
-              >
-                "
-              </div>
-              <div className="flex items-center mb-6">
-                <div
-                  className={`h-14 w-14 ${testimonials[currentIndex].theme.bg} rounded-full flex items-center justify-center text-xl font-bold ${testimonials[currentIndex].theme.text} transition-colors duration-300`}
-                >
-                  {testimonials[currentIndex].initials}
+        {/* Carousel Container */}
+        <div className="relative max-w-5xl mx-auto">
+          {/* Main Card */}
+          {/* Key prop ensures React remounts the component to trigger CSS animations on slide change */}
+          <div
+            key={currentIndex}
+            className="bg-white/70 backdrop-blur-xl rounded-[2.5rem] p-8 md:p-16 border border-white shadow-2xl relative animate-[fadeInUp_0.6s_ease-out]"
+          >
+            {/* Giant Background Quote Icon */}
+            <Quote className="absolute top-10 left-10 text-slate-100 w-32 h-32 -z-10 rotate-180" />
+
+            <div className="flex flex-col items-center text-center relative z-10">
+              {/* Rating & Badge */}
+              <div className="flex items-center gap-4 mb-8">
+                <div className="flex gap-1">
+                  {[...Array(5)].map((_, i) => (
+                    <Star
+                      key={i}
+                      size={18}
+                      className="fill-yellow-400 text-yellow-400"
+                    />
+                  ))}
                 </div>
-                <div className="ml-4">
-                  <h4 className="text-lg font-bold text-gray-900">
+                <div className="h-4 w-px bg-slate-300"></div>
+                <div className="flex items-center gap-1 text-sm font-semibold text-slate-500">
+                  <BadgeCheck size={16} className="text-blue-500" /> Verified
+                  User
+                </div>
+              </div>
+
+              {/* Quote Text */}
+              <p className="text-2xl md:text-3xl font-medium text-slate-800 leading-relaxed mb-10 italic">
+                "{testimonials[currentIndex].quote}"
+              </p>
+
+              {/* Author Info */}
+              <div className="flex items-center gap-4 text-left">
+                {/* Avatar with Gradient Ring */}
+                <div
+                  className={`h-16 w-16 rounded-full bg-gradient-to-br ${testimonials[currentIndex].color} p-[3px]`}
+                >
+                  <div className="h-full w-full bg-white rounded-full flex items-center justify-center">
+                    <span
+                      className={`text-xl font-bold bg-clip-text text-transparent bg-gradient-to-br ${testimonials[currentIndex].color}`}
+                    >
+                      {testimonials[currentIndex].initials}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-lg font-bold text-slate-900">
                     {testimonials[currentIndex].author}
                   </h4>
-                  <p className="text-sm text-gray-500">
+                  <p className="text-slate-500 text-sm">
                     {testimonials[currentIndex].role}
                   </p>
                 </div>
               </div>
-              <p className="text-gray-600 italic leading-relaxed relative z-10 text-lg">
-                "{testimonials[currentIndex].quote}"
-              </p>
             </div>
           </div>
 
-          {/* Controls */}
+          {/* Controls - Floating on sides */}
           <button
-            onClick={prevSlide}
-            className="absolute top-1/2 left-0 -translate-y-1/2 -translate-x-2 md:-translate-x-6 p-2 rounded-full bg-white shadow-md hover:bg-gray-50 text-gray-600 hover:text-blue-600 transition-colors focus:outline-none z-20"
-            aria-label="Previous testimonial"
+            onClick={() => handleManualChange("prev")}
+            className="absolute top-1/2 -left-4 md:-left-12 -translate-y-1/2 p-4 rounded-full bg-white shadow-lg shadow-slate-200 text-slate-400 hover:text-blue-600 hover:scale-110 transition-all z-20 focus:outline-none"
           >
-            <ChevronLeft size={24} />
+            <ChevronLeft size={28} />
           </button>
 
           <button
-            onClick={nextSlide}
-            className="absolute top-1/2 right-0 -translate-y-1/2 translate-x-2 md:translate-x-6 p-2 rounded-full bg-white shadow-md hover:bg-gray-50 text-gray-600 hover:text-blue-600 transition-colors focus:outline-none z-20"
-            aria-label="Next testimonial"
+            onClick={() => handleManualChange("next")}
+            className="absolute top-1/2 -right-4 md:-right-12 -translate-y-1/2 p-4 rounded-full bg-white shadow-lg shadow-slate-200 text-slate-400 hover:text-blue-600 hover:scale-110 transition-all z-20 focus:outline-none"
           >
-            <ChevronRight size={24} />
+            <ChevronRight size={28} />
           </button>
 
-          {/* Dots */}
-          <div className="flex justify-center gap-2 mt-8">
+          {/* Progress Indicators */}
+          <div className="flex justify-center gap-3 mt-10">
             {testimonials.map((_, index) => (
               <button
                 key={index}
-                onClick={() => goToSlide(index)}
-                className={`h-2.5 rounded-full transition-all duration-300 ${
+                onClick={() => {
+                  setCurrentIndex(index);
+                  setIsPaused(true);
+                }}
+                className={`h-2 rounded-full transition-all duration-500 ${
                   index === currentIndex
-                    ? "w-8 bg-blue-600"
-                    : "w-2.5 bg-gray-300 hover:bg-gray-400"
+                    ? "w-12 bg-gradient-to-r from-blue-600 to-purple-600"
+                    : "w-2 bg-slate-300 hover:bg-slate-400"
                 }`}
-                aria-label={`Go to slide ${index + 1}`}
               />
             ))}
           </div>
         </div>
       </div>
+
+      {/* Inline Animation Style for the fade up effect */}
+      <style>{`
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </section>
   );
 };
