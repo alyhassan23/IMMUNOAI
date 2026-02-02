@@ -1,6 +1,9 @@
 import json
 import os
 import uuid
+
+from django.utils import timezone  
+import datetime
 from django.conf import settings
 from django.http import HttpResponse
 from django.template.loader import get_template
@@ -330,27 +333,130 @@ def get_patient_history(request):
     sessions = DiagnosticSession.objects.filter(patient=request.user).order_by('-created_at')
     return Response(DiagnosticSessionSerializer(sessions, many=True).data)
 
+# ==========================================
+# 3.5. APPOINTMENT MANAGEMENT (UPDATED)
+# ==========================================
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_patient_appointments(request):
-    appointments = Appointment.objects.filter(patient=request.user).order_by('date_time')
+    now = timezone.now()
+    # Auto-expire old 'upcoming' appointments
+    Appointment.objects.filter(
+        patient=request.user,
+        status='upcoming',
+        date_time__lt=now - datetime.timedelta(hours=1)
+    ).update(status='missed')
+
+    appointments = Appointment.objects.filter(patient=request.user).order_by('-date_time')
     data = []
     for apt in appointments:
         doc_name = f"Dr. {apt.doctor.first_name} {apt.doctor.last_name}"
         spec = "General"
+        avatar = apt.doctor.profile_picture.url if apt.doctor.profile_picture else None
         if hasattr(apt.doctor, 'doctor_profile'):
             spec = apt.doctor.doctor_profile.specialization
+
+        time_diff = (apt.date_time - now).total_seconds() / 60
+        is_joinable = -15 <= time_diff <= 60 and apt.status == 'upcoming'
+
         data.append({
             "id": apt.id,
             "doctor_name": doc_name,
             "specialization": spec,
-            "date": apt.date_time.strftime("%Y-%m-%d"),
-            "time": apt.date_time.strftime("%H:%M"),
+            "doctor_avatar": avatar,
+            "date": apt.date_time.strftime("%b %d, %Y"),
+            "time": apt.date_time.strftime("%I:%M %p"),
+            "raw_date": apt.date_time.isoformat(),
             "status": apt.status,
-            "meet_link": apt.meet_link
+            "meet_link": apt.meet_link,
+            "is_joinable": is_joinable
         })
     return Response(data)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_doctor_appointments(request):
+    now = timezone.now()
+    # Auto-expire
+    Appointment.objects.filter(
+        doctor=request.user,
+        status='upcoming',
+        date_time__lt=now - datetime.timedelta(hours=1)
+    ).update(status='missed')
+
+    appointments = Appointment.objects.filter(doctor=request.user).order_by('date_time')
+    data = []
+    for apt in appointments:
+        # Calculate if joinable (Doctor can join 15 mins early)
+        time_diff = (apt.date_time - now).total_seconds() / 60
+        is_joinable = -15 <= time_diff <= 120 and apt.status == 'upcoming' # Doctors have longer window
+
+        data.append({
+            "id": apt.id,
+            "patient_name": f"{apt.patient.first_name} {apt.patient.last_name}",
+            "patient_id": apt.patient.id,
+            "date": apt.date_time.strftime("%b %d, %Y"),
+            "time": apt.date_time.strftime("%I:%M %p"),
+            "raw_date": apt.date_time.isoformat(),
+            "status": apt.status,
+            "meet_link": apt.meet_link,
+            "is_joinable": is_joinable
+        })
+    return Response(data)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def reschedule_appointment(request):
+    apt_id = request.data.get('appointment_id')
+    new_date = request.data.get('new_date')
+    if not apt_id or not new_date:
+        return Response({"error": "Missing ID or Date"}, status=400)
+
+    try:
+        # Allow Doctor OR Patient to reschedule
+        apt = Appointment.objects.get(
+            Q(patient=request.user) | Q(doctor=request.user),
+            id=apt_id
+        )
+        apt.date_time = new_date
+        apt.status = 'upcoming'
+        apt.save()
+        return Response({"status": "success", "message": "Appointment rescheduled"})
+    except Appointment.DoesNotExist:
+        return Response({"error": "Appointment not found"}, status=404)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cancel_appointment(request):
+    apt_id = request.data.get('appointment_id')
+    try:
+        # Allow Doctor OR Patient to cancel
+        apt = Appointment.objects.get(
+            Q(patient=request.user) | Q(doctor=request.user),
+            id=apt_id
+        )
+        apt.status = 'cancelled'
+        apt.save()
+        return Response({"status": "success", "message": "Appointment cancelled"})
+    except Appointment.DoesNotExist:
+        return Response({"error": "Appointment not found"}, status=404)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def complete_appointment(request):
+    apt_id = request.data.get('appointment_id')
+    try:
+        # Only Doctor can mark complete
+        apt = Appointment.objects.get(id=apt_id, doctor=request.user)
+        apt.status = 'completed'
+        apt.save()
+        return Response({"status": "success", "message": "Marked as completed"})
+    except Appointment.DoesNotExist:
+        return Response({"error": "Appointment not found"}, status=404)
+
+# ... [KEEP REST OF THE FILE UNCHANGED] ...
+# Make sure to keep `book_appointment`, `get_contacts`, `get_chat_history`, etc.
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def book_appointment(request):
@@ -374,8 +480,7 @@ def book_appointment(request):
         return Response({"status": "success", "message": "Appointment booked", "roomId": room_id})
     except User.DoesNotExist:
         return Response({"error": "Doctor not found"}, status=404)
-
-@api_view(['GET'])
+# ... [END OF FILE] ...@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def generate_pdf_report(request, session_id):
     try:

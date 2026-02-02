@@ -17,6 +17,8 @@ urlpatterns = [
     path('patient/dashboard-stats/', views.get_patient_dashboard_stats, name='dashboard_stats'),
     path('patient/appointments/', views.get_patient_appointments, name='patient_appointments'),
     path('patient/book-appointment/', views.book_appointment, name='book_appointment'),
+    path('appointment/reschedule/', views.reschedule_appointment, name='reschedule_appointment'),
+    path('appointment/cancel/', views.cancel_appointment, name='cancel_appointment'),
     path('report/pdf/<int:session_id>/', views.generate_pdf_report, name='generate_pdf'),
 
     # Doctor
@@ -25,6 +27,7 @@ urlpatterns = [
     path('doctor/verify/<int:session_id>/', views.verify_diagnosis, name='verify_diagnosis'),
     path('doctor/appointments/', views.get_doctor_appointments, name='doctor_appointments'),
     path('doctors/<int:pk>/', views.get_doctor_detail, name='get_doctor_detail'),
+     path('appointment/complete/', views.complete_appointment, name='complete_appointment'),
 
     # Public / Doctor Listings
     path('public/doctors/', views.get_all_doctors, name='public_doctors'),
