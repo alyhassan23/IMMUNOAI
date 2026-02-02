@@ -525,10 +525,16 @@ def get_doctor_appointments(request):
 @permission_classes([IsAuthenticated])
 def get_chat_history(request, user_id):
     current_user = request.user
+    
+    # 1. Mark incoming messages from this user as READ
+    Message.objects.filter(sender_id=user_id, receiver=current_user, is_read=False).update(is_read=True)
+    
+    # 2. Fetch history
     messages = Message.objects.filter(
         Q(sender=current_user, receiver_id=user_id) | 
         Q(sender_id=user_id, receiver=current_user)
     ).order_by('timestamp')
+    
     serializer = MessageSerializer(messages, many=True)
     return Response(serializer.data)
 
@@ -550,22 +556,54 @@ def send_message(request):
 @permission_classes([IsAuthenticated])
 def get_contacts(request):
     user = request.user
-    contacts = []
+    contacts_data = []
+    
+    # Helper to get unread count
+    def get_unread_count(contact_user):
+        return Message.objects.filter(sender=contact_user, receiver=user, is_read=False).count()
+
+    # Helper to get last message time
+    def get_last_msg_time(contact_user):
+        last_msg = Message.objects.filter(
+            Q(sender=user, receiver=contact_user) | Q(sender=contact_user, receiver=user)
+        ).order_by('-timestamp').first()
+        return last_msg.timestamp if last_msg else None
+
     if user.is_patient:
         doctors = User.objects.filter(is_doctor=True)
         for doc in doctors:
-            contacts.append({
+            contacts_data.append({
                 "id": doc.id,
                 "name": f"Dr. {doc.first_name} {doc.last_name}",
-                "role": "Specialist"
+                "role": "Specialist",
+                "unread": get_unread_count(doc),
+                "last_active": get_last_msg_time(doc),
+                "avatar": doc.profile_picture.url if doc.profile_picture else None
             })
     else:
-        # Doctor sees patients they have sessions or appointments with
-        pats = User.objects.filter(id__in=DiagnosticSession.objects.values_list('patient_id', flat=True).distinct())
+        patient_ids = set()
+        patient_ids.update(DiagnosticSession.objects.values_list('patient_id', flat=True))
+        patient_ids.update(Appointment.objects.values_list('patient_id', flat=True))
+        patient_ids.update(Message.objects.filter(receiver=user).values_list('sender_id', flat=True))
+        
+        pats = User.objects.filter(id__in=patient_ids)
         for pat in pats:
-            contacts.append({"id": pat.id, "name": f"{pat.first_name} {pat.last_name}", "role": "Patient"})
-    return Response(contacts)
-
+            contacts_data.append({
+                "id": pat.id, 
+                "name": f"{pat.first_name} {pat.last_name}", 
+                "role": "Patient",
+                "unread": get_unread_count(pat),
+                "last_active": get_last_msg_time(pat),
+                "avatar": pat.profile_picture.url if pat.profile_picture else None
+            })
+            
+    # FIXED SORT: Convert datetime to string (ISO format) for comparison with ""
+    contacts_data.sort(key=lambda x: (
+        x['unread'] > 0, 
+        x['last_active'].isoformat() if x['last_active'] else ""
+    ), reverse=True)
+    
+    return Response(contacts_data)
 # ==========================================
 # 5. PUBLIC DOCTOR PROFILES (Find Doctor)
 # ==========================================

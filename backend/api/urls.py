@@ -31,10 +31,10 @@ urlpatterns = [
     path('public/doctors/<int:doctor_id>/', views.get_doctor_detail, name='public_doctor_detail'),
 
     # Messaging
-    path('chat/contacts/', views.get_contacts, name='chat_contacts'),
-    path('chat/history/<int:user_id>/', views.get_chat_history, name='chat_history'),
-    path('chat/send/', views.send_message, name='chat_send'),
-     path('profile/get/', views.get_profile_data, name='get_profile'),
+    path('chat/contacts/', views.get_contacts, name='get_contacts'),
+    path('chat/send/', views.send_message, name='send_message'),
+    path('chat/<int:user_id>/', views.get_chat_history, name='get_chat_history'),
+    path('profile/get/', views.get_profile_data, name='get_profile'),
     path('profile/update/', views.update_profile_data, name='update_profile'),
      # Contact Form
     path('contact/submit/', views.submit_contact_query, name='submit_contact_query'),
