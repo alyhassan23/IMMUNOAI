@@ -11,7 +11,7 @@ from django.db.models import Q
 from xhtml2pdf import pisa
 
 from rest_framework import status
-from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.decorators import api_view, parser_classes, permission_classes,  authentication_classes
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -26,6 +26,17 @@ from .services.ai_engine import HybridAIEngine
 # ... existing imports ...
 from .models import User, PatientProfile, DoctorProfile, DiagnosticSession, Appointment, Message, ContactQuery
 from .serializers import UserSerializer, DiagnosticSessionSerializer, AppointmentSerializer, MessageSerializer, ContactQuerySerializer
+from .services.rag_service import ImmunoRAG  # Make sure this import is here
+# Initialize AI Engines
+try:
+    print("🚀 Initializing AI Engines...")
+    ai_engine = HybridAIEngine()
+    rag_engine = ImmunoRAG()
+    print("✅ Engines Ready")
+except Exception as e:
+    print(f"❌ AI Init Error: {e}")
+    ai_engine = None
+    rag_engine = None
 
 
 
@@ -792,3 +803,24 @@ def submit_contact_query(request):
         serializer.save()
         return Response({"status": "success", "message": "Message sent successfully!"})
     return Response(serializer.errors, status=400)
+
+
+# ==========================================
+# 6. AI CHATBOT (RAG)
+# ==========================================
+@api_view(['POST'])
+@permission_classes([AllowAny]) 
+@authentication_classes([]) # Disable authentication entirely for this view to prevent 401
+def chat_with_ai(request):
+    query = request.data.get('query')
+    user_type = request.data.get('user_type', 'doctor')
+    
+    if not query:
+        return Response({"error": "No query provided"}, status=400)
+    
+    if rag_engine:
+        answer = rag_engine.get_answer(query, user_type)
+    else:
+        answer = "AI Chatbot unavailable. Please try later."
+        
+    return Response({"answer": answer})

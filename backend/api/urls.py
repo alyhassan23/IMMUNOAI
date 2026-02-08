@@ -41,4 +41,5 @@ urlpatterns = [
     path('profile/update/', views.update_profile_data, name='update_profile'),
      # Contact Form
     path('contact/submit/', views.submit_contact_query, name='submit_contact_query'),
+    path('ai/chat/', views.chat_with_ai, name='ai_chat'),
 ]

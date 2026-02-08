@@ -28,6 +28,7 @@ import PatientChat from "./pages/patient/PatientChat";
 import TreatmentRecommendations from "./pages/patient/TreatmentRecommendations";
 import PatientHistory from "./pages/patient/PatientHistory";
 import PatientAppointments from "./pages/patient/PatientAppointments";
+import ImmunoChatbot from "./components/ImmunoChatbot";
 
 // Doctor Dashboard Components
 import DoctorLayout from "./components/dashboard/DoctorLayout";
@@ -87,6 +88,7 @@ function App() {
           <Route path="messages" element={<DoctorChat />} />
         </Route>
       </Routes>
+      <ImmunoChatbot />
     </BrowserRouter>
   );
 }
