@@ -557,14 +557,15 @@ def generate_pdf_report(request, session_id):
             "date": session.created_at.strftime("%Y-%m-%d"),
             "session_id": session.id,
             "disease_type": "Autoimmune Encephalitis" if disease_type == 'AE' else "Pemphigus Vulgaris",
-            "result": session.prediction_result,
-            "confidence": session.confidence_score,
-            "explanation": session.ai_explanation_text,
-            "formatted_clinical_data": formatted_clinical_data,
+            "result": session.prediction_result or "N/A",
+            "confidence": int(session.confidence_score or 0),
+            "explanation": session.ai_explanation_text or "",
+            "formatted_clinical_data": formatted_clinical_data or [],
             "grad_cam_path": None,
-            "doctor_notes": session.doctor_notes,
-            "status": session.status.upper()
+            "doctor_notes": session.doctor_notes or "",
+            "status": (session.status or "PENDING").upper()
         }
+
         
         # Absolute Path Logic for Grad-CAM
         if session.disease_type == 'AE' and session.mri_scan:
@@ -575,7 +576,8 @@ def generate_pdf_report(request, session_id):
              for fname in possible_names:
                  full_path = os.path.join(settings.MEDIA_ROOT, 'grad_cam', fname)
                  if os.path.exists(full_path):
-                     context['grad_cam_path'] = full_path
+                     context['grad_cam_path'] = f"file:///{full_path}"
+
                      break
                      
         template_path = 'report_template.html'
