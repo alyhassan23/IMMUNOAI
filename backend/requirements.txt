@@ -1,23 +1,43 @@
-# Core Framework
-django>=5.0
+# --- Core Framework ---
+Django>=5.0,<6.0
 djangorestframework
 django-cors-headers
+python-dotenv
 
-# Database
-psycopg2-binary
+# --- Database & Auth ---
+psycopg2-binary  # If using PostgreSQL (recommended), otherwise can skip for SQLite
+djangorestframework-simplejwt
+PyJWT
 
-# AI & Data Science
+# --- Machine Learning & AI ---
 numpy
 pandas
 scikit-learn
-xgboost
-lightgbm
+joblib
 torch
 torchvision
-opencv-python
-pillow
+torchaudio
 shap
+xgboost
+lightgbm
+opencv-python
+pillow  # For image processing
 
-# Utilities
-python-dotenv
-requests
+# --- RAG & Chatbot (LangChain/Pinecone/Groq) ---
+langchain
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain-huggingface
+langchain-groq
+langchain-pinecone
+pinecone-client
+huggingface-hub
+pypdf  # For reading PDF research papers
+
+# --- PDF Generation ---
+xhtml2pdf
+reportlab
+
+# --- Testing ---
+coverage  # For generating test reports

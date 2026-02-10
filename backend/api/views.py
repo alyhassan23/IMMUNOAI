@@ -10,6 +10,9 @@ from django.template.loader import get_template
 from django.db.models import Q
 from xhtml2pdf import pisa
 
+from django.http import HttpResponse, JsonResponse 
+from django.contrib.staticfiles import finders
+
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes,  authentication_classes
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -491,33 +494,47 @@ def book_appointment(request):
         return Response({"status": "success", "message": "Appointment booked", "roomId": room_id})
     except User.DoesNotExist:
         return Response({"error": "Doctor not found"}, status=404)
-# ... [END OF FILE] ...@api_view(['GET'])
+
+def link_callback(uri, rel):
+    """
+    Convert HTML URIs to absolute system paths so xhtml2pdf can access images/css
+    """
+    result = finders.find(uri)
+    if result:
+        if isinstance(result, (list, tuple)):
+            result = result[0]
+        return result
+    
+    # Check media folder
+    if settings.MEDIA_URL and uri.startswith(settings.MEDIA_URL):
+        path = os.path.join(settings.MEDIA_ROOT, uri.replace(settings.MEDIA_URL, ""))
+        return path
+        
+    return uri
+
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def generate_pdf_report(request, session_id):
+    """
+    Fixed PDF Generation: Uses JsonResponse for errors to avoid renderer conflicts.
+    """
     try:
         session = DiagnosticSession.objects.get(id=session_id)
+        # Check ownership
         if not request.user.is_doctor and session.patient != request.user:
-            return Response({"error": "Unauthorized"}, status=403)
+            return JsonResponse({"error": "Unauthorized"}, status=403)
             
-        disease_type = session.disease_type # 'AE' or 'PV'
-
-        # --- Filtered Clinical Data for PDF ---
+        disease_type = session.disease_type
         formatted_clinical_data = []
+        
         if session.clinical_data:
-            # Define relevant keys for each disease
             ae_keys = ['age', 'sex', 'pain_score', 'seizures', 'memory_loss', 'csf_protein', 'csf_cells', 'antibody_titer', 'neuro_score', 'csf_ratio', 'imaging_score']
             pv_keys = ['age', 'sex', 'pain_score', 'skin_blisters', 'mucosal_ulcers', 'dsg1_index', 'dsg3_index', 'skin_score']
-            
             target_keys = ae_keys if disease_type == 'AE' else pv_keys
-            
             for key, value in session.clinical_data.items():
-                # Only include keys relevant to the disease (and skip internal ones)
-                if key not in target_keys:
-                    continue
-                
+                if key not in target_keys: continue
                 status_label = "Normal"
                 status_color = "dot-green"
-                
                 try:
                     val = float(value)
                     if 'protein' in key and val > 45: status_label, status_color = "High", "dot-red"
@@ -527,14 +544,13 @@ def generate_pdf_report(request, session_id):
                     elif 'blisters' in key and val > 0: status_label, status_color = "Present", "dot-red"
                     elif 'seizures' in key and val > 0: status_label, status_color = "Present", "dot-red"
                 except: pass
-
                 formatted_clinical_data.append({
                     "name": key.replace('_', ' ').title(),
                     "value": value,
                     "status_label": status_label,
                     "status_color": status_color
                 })
-
+        
         context = {
             "patient_name": f"{session.patient.first_name} {session.patient.last_name}",
             "patient_id": session.patient.id,
@@ -544,33 +560,44 @@ def generate_pdf_report(request, session_id):
             "result": session.prediction_result,
             "confidence": session.confidence_score,
             "explanation": session.ai_explanation_text,
-            "formatted_clinical_data": formatted_clinical_data, # Use the filtered list
+            "formatted_clinical_data": formatted_clinical_data,
             "grad_cam_path": None,
             "doctor_notes": session.doctor_notes,
             "status": session.status.upper()
         }
         
-        # Handle GradCAM only for AE
+        # Absolute Path Logic for Grad-CAM
         if session.disease_type == 'AE' and session.mri_scan:
              filename = f"gradcam_{os.path.basename(session.mri_scan.name)}"
-             full_path = os.path.join(settings.MEDIA_ROOT, 'grad_cam', filename)
-             if os.path.exists(full_path):
-                 context['grad_cam_path'] = full_path
-
+             # Check multiple possible name formats to be safe
+             possible_names = [filename, f"gradcam_{os.path.basename(session.mri_scan.name).split('.')[0]}.jpg"]
+             
+             for fname in possible_names:
+                 full_path = os.path.join(settings.MEDIA_ROOT, 'grad_cam', fname)
+                 if os.path.exists(full_path):
+                     context['grad_cam_path'] = full_path
+                     break
+                     
         template_path = 'report_template.html'
         template = get_template(template_path)
         html = template.render(context)
         
         response = HttpResponse(content_type='application/pdf')
         response['Content-Disposition'] = f'attachment; filename="Report_{session_id}.pdf"'
-        pisa_status = pisa.CreatePDF(html, dest=response)
         
-        if pisa_status.err: return Response({"error": "PDF generation failed"}, status=500)
+        # Link callback handles finding images on disk
+        pisa_status = pisa.CreatePDF(html, dest=response, link_callback=link_callback)
+        
+        if pisa_status.err: 
+            return JsonResponse({"error": "PDF generation failed"}, status=500)
+            
         return response
+        
     except DiagnosticSession.DoesNotExist:
-        return Response({"error": "Session not found"}, status=404)
+        return JsonResponse({"error": "Session not found"}, status=404)
     except Exception as e:
-        return Response({"error": str(e)}, status=500)
+        return JsonResponse({"error": str(e)}, status=500)
+
 # ==========================================
 # 3. DOCTOR ENDPOINTS
 # ==========================================

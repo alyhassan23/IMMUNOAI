@@ -19,7 +19,7 @@ class ImmunoRAG:
     def __init__(self):
         # Configuration - Get keys from Environment
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        self.pinecone_api_key = os.getenv("PINECONE_API_KEY") 
         self.hf_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
         
         # Ensure Environment Variables are set for libraries that rely on them implicitly

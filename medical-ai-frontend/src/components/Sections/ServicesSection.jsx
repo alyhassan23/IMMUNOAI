@@ -17,8 +17,8 @@ const ServicesSection = () => {
   const services = [
     {
       id: 0,
-      title: "Multimodal Data Ingestion",
-      desc: "Support for DICOM (MRI), structured JSON, and PDF reports with auto-normalization.",
+      title: "Data Ingestion",
+      desc: "Support for MRI, lab Data & Symptoms.",
       icon: <Microscope className="h-6 w-6" />,
       color: "from-cyan-400 to-blue-500",
       bg: "bg-cyan-50",
@@ -143,7 +143,7 @@ const ServicesSection = () => {
                   <div className="bg-slate-800/80 rounded-xl p-6 border border-slate-700 w-full max-w-md mx-auto">
                     <div className="flex items-center justify-between mb-6">
                       <span className="text-cyan-400 font-mono text-sm">
-                        UPLOADING DICOM...
+                        UPLOADING Data...
                       </span>
                       <span className="text-white font-bold">84%</span>
                     </div>
@@ -157,7 +157,7 @@ const ServicesSection = () => {
                           className="flex items-center gap-3 text-sm text-slate-300"
                         >
                           <CheckCircle2 size={16} className="text-green-500" />
-                          <span>Sequence_T2_FLAIR_00{i}.dcm</span>
+                          <span>Sequence_T2_FLAIR_00{i}</span>
                         </div>
                       ))}
                     </div>

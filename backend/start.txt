@@ -3,3 +3,33 @@ python manage.py runserver
 
 python manage.py makemigrations
 python manage.py migrate
+
+
+
+pip install coverage
+
+**Step 2: Run Tests with Coverage**
+Instead of `python manage.py test`, run:
+```bash
+coverage run --source='api' manage.py test api
+
+**Step 3: Generate the Report**
+```bash
+coverage report
+You will see a table like this:
+Name                                Stmts   Miss  Cover
+-------------------------------------------------------
+api/models.py                          45      0   100%
+api/serializers.py                     30      0   100%
+api/services/ai_engine.py             150     20    87%
+api/views.py                          200     15    92%
+-------------------------------------------------------
+TOTAL                                 425     35    92%
+
+**Step 4: Generate HTML Report (Optional but impressive)**
+```bash
+coverage html
+This creates a folder `htmlcov`. Open `htmlcov/index.html` in your browser to see a visual representation of your code with green (tested) and red (untested) lines.
+
+**Summary:**
+With the 5 previous files + these 2 new ones (`test_advanced_features.py`, `test_edge_cases.py`) + the `coverage` report, you have a **fully professional, industry-standard testing setup**.

@@ -1,23 +1,39 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Brain, Menu, X, ChevronRight } from "lucide-react";
+import {
+  Brain,
+  Menu,
+  X,
+  ChevronRight,
+  UserPlus,
+  Stethoscope,
+  User,
+} from "lucide-react";
 
-// Added 'lightMode' prop. If true, text starts white (for dark backgrounds).
 const Navbar = ({ lightMode = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const dropdownRef = useRef(null);
 
   // Handle Scroll Effect
   useEffect(() => {
     const handleScroll = () => {
-      if (window.scrollY > 20) {
-        setScrolled(true);
-      } else {
-        setScrolled(false);
-      }
+      setScrolled(window.scrollY > 20);
     };
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setRegisterOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const toggleMenu = () => setIsOpen(!isOpen);
@@ -33,9 +49,6 @@ const Navbar = ({ lightMode = false }) => {
   ];
 
   // Dynamic Text Color Logic
-  // If scrolled -> Dark Text (Gray-700)
-  // If NOT scrolled & lightMode is ON -> White Text
-  // If NOT scrolled & lightMode is OFF -> Dark Text (Gray-600)
   const textColorClass = scrolled
     ? "text-gray-600 hover:text-blue-600"
     : lightMode
@@ -86,10 +99,9 @@ const Navbar = ({ lightMode = false }) => {
               <Link
                 key={link.name}
                 to={link.path}
-                className={`relative px-4 py-2 text-sm font-semibold rounded-full transition-all duration-200 group ${textColorClass} ${!scrolled && lightMode ? "hover:bg-white/10" : "hover:bg-blue-50/50"}`}
+                className={`relative px-3 py-2 text-sm font-semibold rounded-full transition-all duration-200 group ${textColorClass} ${!scrolled && lightMode ? "hover:bg-white/10" : "hover:bg-blue-50/50"}`}
               >
                 {link.name}
-                {/* Subtle underline animation */}
                 <span
                   className={`absolute bottom-1 left-1/2 -translate-x-1/2 w-0 h-0.5 rounded-full transition-all duration-300 group-hover:w-1/2 opacity-0 group-hover:opacity-100 ${lightMode && !scrolled ? "bg-white" : "bg-blue-600"}`}
                 ></span>
@@ -100,12 +112,68 @@ const Navbar = ({ lightMode = false }) => {
               className={`pl-4 ml-4 border-l h-6 ${scrolled || !lightMode ? "border-gray-200" : "border-white/20"}`}
             ></div>
 
+            {/* Login Link */}
             <Link
               to="/login"
-              className={`ml-4 px-6 py-2.5 text-sm font-bold rounded-full shadow-lg transition-all duration-200 hover:-translate-y-0.5 ${scrolled || !lightMode ? "text-white bg-gradient-to-r from-blue-600 to-purple-600 shadow-blue-500/30" : "text-blue-900 bg-white shadow-black/10 hover:shadow-black/20"}`}
+              className={`ml-4 px-4 py-2 text-sm font-bold rounded-full transition-colors ${textColorClass} hover:bg-black/5`}
             >
               Login
             </Link>
+
+            {/* Register Dropdown */}
+            <div className="relative ml-2" ref={dropdownRef}>
+              <button
+                onClick={() => setRegisterOpen(!registerOpen)}
+                className={`px-5 py-2.5 text-sm font-bold rounded-full shadow-lg transition-all duration-200 hover:-translate-y-0.5 flex items-center gap-2 ${scrolled || !lightMode ? "text-white bg-gradient-to-r from-blue-600 to-purple-600 shadow-blue-500/30" : "text-blue-900 bg-white shadow-black/10 hover:shadow-black/20"}`}
+              >
+                Get Started{" "}
+                <ChevronRight
+                  size={14}
+                  className={`transition-transform duration-200 ${registerOpen ? "rotate-90" : ""}`}
+                />
+              </button>
+
+              {/* Dropdown Menu */}
+              <div
+                className={`absolute top-full right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transform transition-all duration-200 origin-top-right ${registerOpen ? "opacity-100 scale-100 translate-y-0" : "opacity-0 scale-95 -translate-y-2 pointer-events-none"}`}
+              >
+                <div className="p-2">
+                  <p className="px-3 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    Register as
+                  </p>
+                  <Link
+                    to="/register-patient"
+                    onClick={() => setRegisterOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-blue-50 text-gray-700 hover:text-blue-600 transition-colors group"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <User size={16} />
+                    </div>
+                    <div>
+                      <span className="block text-sm font-bold">Patient</span>
+                      <span className="block text-xs text-gray-400">
+                        Get diagnosed
+                      </span>
+                    </div>
+                  </Link>
+                  <Link
+                    to="/register-doctor"
+                    onClick={() => setRegisterOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-purple-50 text-gray-700 hover:text-purple-600 transition-colors group mt-1"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                      <Stethoscope size={16} />
+                    </div>
+                    <div>
+                      <span className="block text-sm font-bold">Doctor</span>
+                      <span className="block text-xs text-gray-400">
+                        Join network
+                      </span>
+                    </div>
+                  </Link>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* --- Mobile Menu Button --- */}
@@ -121,7 +189,7 @@ const Navbar = ({ lightMode = false }) => {
         </div>
       </div>
 
-      {/* --- Mobile Menu Dropdown (Unchanged logic, just ensure text is visible) --- */}
+      {/* --- Mobile Menu Dropdown --- */}
       <div
         className={`md:hidden absolute top-full left-0 w-full bg-white/95 backdrop-blur-xl border-b border-gray-100 shadow-xl transition-all duration-300 ease-in-out origin-top ${
           isOpen
@@ -129,7 +197,7 @@ const Navbar = ({ lightMode = false }) => {
             : "opacity-0 -translate-y-5 invisible"
         }`}
       >
-        <div className="px-4 py-6 space-y-2">
+        <div className="px-4 py-6 space-y-2 max-h-[85vh] overflow-y-auto">
           {navLinks.map((link) => (
             <Link
               key={link.name}
@@ -142,14 +210,37 @@ const Navbar = ({ lightMode = false }) => {
             </Link>
           ))}
 
-          <div className="pt-6 mt-4 border-t border-gray-100">
+          <div className="pt-6 mt-4 border-t border-gray-100 space-y-3">
+            <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider">
+              Account Access
+            </p>
+
             <Link
               to="/login"
-              className="block w-full text-center px-4 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold rounded-xl shadow-lg shadow-blue-500/30 active:scale-95 transition-transform"
+              className="flex items-center justify-center w-full px-4 py-3 border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors"
               onClick={closeMenu}
             >
-              Access Portal
+              Log In
             </Link>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Link
+                to="/register-patient"
+                className="flex flex-col items-center justify-center px-2 py-4 bg-blue-50 text-blue-700 rounded-xl hover:bg-blue-100 transition-colors"
+                onClick={closeMenu}
+              >
+                <User size={20} className="mb-1" />
+                <span className="text-sm font-bold">Patient Sign Up</span>
+              </Link>
+              <Link
+                to="/register-doctor"
+                className="flex flex-col items-center justify-center px-2 py-4 bg-purple-50 text-purple-700 rounded-xl hover:bg-purple-100 transition-colors"
+                onClick={closeMenu}
+              >
+                <Stethoscope size={20} className="mb-1" />
+                <span className="text-sm font-bold">Doctor Sign Up</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>

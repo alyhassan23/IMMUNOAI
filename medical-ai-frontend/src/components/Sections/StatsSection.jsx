@@ -62,7 +62,7 @@ const StatsSection = () => {
               <Box size={24} />
             </div>
             <div className="mt-6 text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-purple-600 to-pink-500 mb-2 group-hover:animate-pulse">
-              3D
+              2D
             </div>
             <div className="text-sm font-bold text-gray-400 tracking-wider uppercase group-hover:text-purple-600 transition-colors">
               MRI Volume Analysis

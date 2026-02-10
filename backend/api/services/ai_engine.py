@@ -11,9 +11,14 @@ import shap
 import json
 import traceback
 import xgboost as xgb
+import logging
 from PIL import Image
 from django.conf import settings
 from torch.nn import functional as F
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Configuration
 MODEL_DIR = os.path.join(settings.BASE_DIR, 'ml_models')
@@ -42,110 +47,152 @@ class AE_CNN_Model(nn.Module):
         x = self.fc(x)
         return x
 
+
 class HybridAIEngine:
     def __init__(self):
         self.models = {}
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # --- HARDCODED FEATURE SCHEMAS (Based on Error Logs) ---
-        # 1. XGBoost explicit features (Includes Skin/Clinical symptoms)
-        self.xgb_features = [
-            'seizures', 'memory_loss', 'psychiatric_symptoms', 'skin_blisters', 
-            'mucosal_ulcers', 'pain_score', 'age', 'sex', 'csf_protein', 
-            'neuro_score', 'skin_score', 'total_symptoms', 'clinical_contrast', 
-            'pain_x_skin', 'symptom_severity'
+        # === DISEASE-SPECIFIC FEATURE SCHEMAS ===
+        # Fixed: Separate feature sets for AE and PV
+        
+        # 1. AE-specific features (CSF + Imaging + Neuro)
+        self.ae_features = [
+            'csf_protein', 'csf_cells', 'csf_protein_log', 'csf_cells_log',
+            'csf_inflammation', 'csf_ratio', 'csf_product',
+            'mri_abnormal', 'eeg_abnormal', 'imaging_score',
+            'seizures', 'memory_loss', 'psychiatric_symptoms', 'neuro_score',
+            'antibody_titer', 'antibody_log',
+            'age', 'sex', 'age_x_csf',
+            'tumor_status', 'infection_status',
+            'ae_risk_score', 'neuro_x_csf'
         ]
         
-        # 2. Random Forest features (AE Focused)
-        self.rf_features_fallback = [
-            'csf_protein', 'csf_cells', 'mri_abnormal', 'eeg_abnormal', 
-            'age', 'sex', 'spurious_marker', 'csf_protein_log', 
-            'csf_cells_log', 'csf_inflammation', 'csf_ratio', 
-            'imaging_score', 'age_x_csf'
+        # 2. PV-specific features (Dsg + Skin + Clinical)  
+        self.pv_features = [
+            'dsg1_index', 'dsg3_index', 'dsg1_log', 'dsg3_log',
+            'dsg_total', 'dsg_product', 'dsg_ratio',
+            'dsg1_high', 'dsg3_high', 'both_dsg_high',
+            'skin_blisters', 'mucosal_ulcers', 'skin_score',
+            'pain_score', 'pain_x_skin', 'pain_severity',
+            'age', 'sex', 'age_x_dsg',
+            'infection_status',
+            'pv_risk_score', 'dsg_x_skin', 'dsg_x_pain'
         ]
+        
+        # 3. Fallback features (for models without feature_names_in_)
+        self.rf_features_fallback = self.ae_features  # RF is AE-focused
+        self.xgb_features_fallback = self.pv_features  # XGB is PV-focused
 
-        # 3. Load Models
+        # Clinical thresholds
+        self.clinical_thresholds = {
+            'AE': {
+                'csf_protein': 45,
+                'csf_cells': 5,
+                'antibody_titer': 60
+            },
+            'PV': {
+                'dsg1_index': 20,
+                'dsg3_index': 20
+            }
+        }
+
+        # Load models
         self._load_models()
-        self._load_explainers() # Renamed to handle multiple explainers
+        self._load_explainers()
         self._load_cnn()
 
     def _load_models(self):
+        """Load ML models with proper error handling"""
         try:
-            # Random Forest
-            if os.path.exists(os.path.join(MODEL_DIR, 'rf_model.pkl')):
-                self.models['rf'] = joblib.load(os.path.join(MODEL_DIR, 'rf_model.pkl'))
-                print("✅ RF Model Loaded")
+            # Random Forest (AE-focused)
+            rf_path = os.path.join(MODEL_DIR, 'rf_model.pkl')
+            if not os.path.exists(rf_path):
+                rf_path = os.path.join(MODEL_DIR, 'rf_fold_4.pkl')
+            
+            if os.path.exists(rf_path):
+                self.models['rf'] = joblib.load(rf_path)
+                logger.info("✅ RF Model Loaded")
 
-            # XGBoost
-            if os.path.exists(os.path.join(MODEL_DIR, 'xgb_model.pkl')):
-                self.models['xgb'] = joblib.load(os.path.join(MODEL_DIR, 'xgb_model.pkl'))
-                print("✅ XGBoost Model Loaded")
+            # XGBoost (PV-focused)
+            xgb_path = os.path.join(MODEL_DIR, 'xgb_model.pkl')
+            if os.path.exists(xgb_path):
+                self.models['xgb'] = joblib.load(xgb_path)
+                logger.info("✅ XGBoost Model Loaded")
             elif os.path.exists(os.path.join(MODEL_DIR, 'xgb_model.json')):
                 self.models['xgb'] = xgb.Booster()
                 self.models['xgb'].load_model(os.path.join(MODEL_DIR, 'xgb_model.json'))
-                print("✅ XGBoost (JSON) Loaded")
+                logger.info("✅ XGBoost (JSON) Loaded")
 
             # LightGBM
-            if os.path.exists(os.path.join(MODEL_DIR, 'lgb_model.pkl')):
-                self.models['lgbm'] = joblib.load(os.path.join(MODEL_DIR, 'lgb_model.pkl'))
-                print("✅ LightGBM Model Loaded")
+            lgb_path = os.path.join(MODEL_DIR, 'lgb_model.pkl')
+            if not os.path.exists(lgb_path):
+                lgb_path = os.path.join(MODEL_DIR, 'lgb_fold_3.pkl')
+                
+            if os.path.exists(lgb_path):
+                self.models['lgbm'] = joblib.load(lgb_path)
+                logger.info("✅ LightGBM Model Loaded")
             elif os.path.exists(os.path.join(MODEL_DIR, 'lgb_model.txt')):
                 import lightgbm as lgb
                 self.models['lgbm'] = lgb.Booster(model_file=os.path.join(MODEL_DIR, 'lgb_model.txt'))
-                print("✅ LightGBM (TXT) Loaded")
+                logger.info("✅ LightGBM (TXT) Loaded")
 
             # Meta Learner
             if os.path.exists(os.path.join(MODEL_DIR, 'stacking_meta_learner.pkl')):
                 self.models['meta'] = joblib.load(os.path.join(MODEL_DIR, 'stacking_meta_learner.pkl'))
-                print("✅ Meta-Learner Loaded")
+                logger.info("✅ Meta-Learner Loaded")
                 
         except Exception as e:
-            print(f"❌ Error loading tabular models: {e}")
+            logger.error(f"❌ Error loading tabular models: {e}")
+            traceback.print_exc()
 
     def _load_explainers(self):
+        """Load SHAP explainers with validation"""
         self.explainers = {}
         
-        # 1. RF Explainer (Best for AE / Tabular)
+        # RF Explainer (AE-focused)
         try:
             shap_path = os.path.join(MODEL_DIR, 'shap_explainer_rf.pkl')
             if os.path.exists(shap_path):
                 self.explainers['rf'] = joblib.load(shap_path)
-                print("✅ SHAP (RF) Loaded from File")
+                logger.info("✅ SHAP (RF) Loaded from File")
             elif 'rf' in self.models:
                 self.explainers['rf'] = shap.TreeExplainer(self.models['rf'])
-                print("✅ SHAP (RF) Initialized")
+                logger.info("✅ SHAP (RF) Initialized")
         except Exception as e:
-            print(f"⚠️ SHAP (RF) Init Warning: {e}")
+            logger.warning(f"⚠️ SHAP (RF) Init Warning: {e}")
 
-        # 2. XGB Explainer (Best for PV / Clinical)
-        # We try to load this to give better features for PV cases
+        # XGB Explainer (PV-focused)
         try:
             if 'xgb' in self.models:
                 self.explainers['xgb'] = shap.TreeExplainer(self.models['xgb'])
-                print("✅ SHAP (XGB) Initialized")
+                logger.info("✅ SHAP (XGB) Initialized")
         except Exception as e:
-            print(f"⚠️ SHAP (XGB) Init Warning: {e}")
+            logger.warning(f"⚠️ SHAP (XGB) Init Warning: {e}")
 
     def _load_cnn(self):
+        """Load CNN model for MRI analysis"""
         self.cnn_model = None
         try:
             cnn_path = os.path.join(MODEL_DIR, 'ae_cnn_model.pth')
-            if not os.path.exists(cnn_path): cnn_path = os.path.join(MODEL_DIR, 'fusion_ann.pth')
+            if not os.path.exists(cnn_path):
+                cnn_path = os.path.join(MODEL_DIR, 'fusion_ann.pth')
             
             if os.path.exists(cnn_path):
                 self.cnn_model = AE_CNN_Model().to(self.device)
                 state_dict = torch.load(cnn_path, map_location=self.device)
                 self.cnn_model.load_state_dict(state_dict, strict=False)
                 self.cnn_model.eval()
-                print("✅ AE CNN Model Loaded")
+                logger.info("✅ AE CNN Model Loaded")
         except Exception as e:
-            print(f"❌ CNN Load Error: {e}")
+            logger.error(f"❌ CNN Load Error: {e}")
+            traceback.print_exc()
 
-    def engineer_features(self, df):
+    def engineer_features(self, df, disease_type='AE'):
         """
-        Master Feature Engineering - Generates SUPERSET of all possible features
+        FIXED: Comprehensive feature engineering with disease-specific focus
         """
-        # 1. Base Columns
+        # 1. Ensure all base columns exist
         base_cols = [
             'age', 'sex', 'seizures', 'memory_loss', 'psychiatric_symptoms',
             'skin_blisters', 'mucosal_ulcers', 'pain_score', 'csf_protein',
@@ -153,63 +200,144 @@ class HybridAIEngine:
             'mri_abnormal', 'eeg_abnormal', 'tumor_status', 'infection_status'
         ]
         for col in base_cols:
-            if col not in df.columns: df[col] = 0
+            if col not in df.columns:
+                df[col] = 0
 
-        # 2. Derived Features
+        # 2. CSF Features (AE-focused)
         df['csf_protein_log'] = np.log1p(df['csf_protein'])
         df['csf_cells_log'] = np.log1p(df['csf_cells'])
         df['csf_inflammation'] = df['csf_protein'] * df['csf_cells']
         df['csf_ratio'] = df['csf_protein'] / (df['csf_cells'] + 1)
-        df['imaging_score'] = df['mri_abnormal'] + df['eeg_abnormal']
-        df['age_x_csf'] = df['age'] * df['csf_protein']
+        df['csf_product'] = df['csf_protein'] * df['csf_cells']
+        df['csf_abnormal'] = ((df['csf_protein'] > 45) | (df['csf_cells'] > 5)).astype(int)
 
+        # 3. Dsg Features (PV-focused) - FIXED: Now properly calculated
+        df['dsg1_log'] = np.log1p(df['dsg1_index'])
+        df['dsg3_log'] = np.log1p(df['dsg3_index'])
+        df['dsg_total'] = df['dsg1_index'] + df['dsg3_index']
+        df['dsg_ratio'] = df['dsg1_index'] / (df['dsg3_index'] + 1)
+        df['dsg_product'] = df['dsg1_index'] * df['dsg3_index']
+        df['dsg1_high'] = (df['dsg1_index'] > 20).astype(int)
+        df['dsg3_high'] = (df['dsg3_index'] > 20).astype(int)
+        df['both_dsg_high'] = ((df['dsg1_high'] == 1) & (df['dsg3_high'] == 1)).astype(int)
+        df['dsg_abnormal'] = ((df['dsg1_index'] > 20) | (df['dsg3_index'] > 20)).astype(int)
+
+        # 4. Imaging Features (AE-focused)
+        df['imaging_score'] = df['mri_abnormal'] + df['eeg_abnormal']
+        df['imaging_complete'] = ((df['mri_abnormal'] == 1) & (df['eeg_abnormal'] == 1)).astype(int)
+
+        # 5. Neurological Features
         df['neuro_score'] = df['seizures'] + df['memory_loss'] + df['psychiatric_symptoms']
+        df['neuro_dominant'] = (df['neuro_score'] >= 2).astype(int)
+        df['neuro_complete'] = (df['neuro_score'] == 3).astype(int)
+
+        # 6. Skin Features
         df['skin_score'] = df['skin_blisters'] + df['mucosal_ulcers']
-        df['total_symptoms'] = df['neuro_score'] + df['skin_score']
-        df['clinical_contrast'] = df['neuro_score'] - df['skin_score']
+        df['skin_dominant'] = (df['skin_score'] >= 1).astype(int)
+        df['skin_complete'] = ((df['skin_blisters'] == 1) & (df['mucosal_ulcers'] == 1)).astype(int)
+
+        # 7. Pain/Severity Features
         df['pain_x_skin'] = df['pain_score'] * df['skin_score']
+        df['pain_severity'] = (df['pain_score'] > 5).astype(int)
+
+        # 8. Antibody Features
+        df['antibody_log'] = np.log1p(df['antibody_titer'])
+        df['antibody_high'] = (df['antibody_titer'] > 60).astype(int)
+
+        # 9. Interaction Features
+        df['age_x_csf'] = df['age'] * df['csf_protein']
+        df['age_x_dsg'] = df['age'] * df['dsg_total']
+        df['neuro_x_csf'] = df['neuro_score'] * df['csf_protein']
+        df['dsg_x_skin'] = df['dsg_total'] * df['skin_score']
+        df['dsg_x_pain'] = df['dsg_total'] * df['pain_score']
+        df['skin_x_pain'] = df['skin_score'] * df['pain_score']
+        df['csf_x_imaging'] = df['csf_inflammation'] * df['imaging_score']
+        df['antibody_x_csf'] = df['antibody_titer'] * df['csf_protein']
+
+        # 10. Differential Features
+        df['clinical_contrast'] = df['neuro_score'] - df['skin_score']
+        df['biomarker_contrast'] = (
+            (df['csf_protein'] - 30) / 50 - 
+            (df['dsg_total'] - 30) / 100
+        )
+
+        # 11. Composite Scores
+        df['total_symptoms'] = df['neuro_score'] + df['skin_score']
         df['symptom_severity'] = df['total_symptoms'] * df['pain_score']
 
-        df['neuro_x_csf'] = df['neuro_score'] * df['csf_protein']
-        df['skin_x_pain'] = df['skin_score'] * df['pain_score']
-        df['csf_product'] = df['csf_protein'] * df['csf_cells'] 
+        # 12. AE Risk Score
+        df['ae_risk_score'] = (
+            df['csf_abnormal'] * 3 +
+            df['neuro_dominant'] * 2 +
+            df['imaging_score'] * 2 +
+            df['antibody_high'] * 1
+        )
+
+        # 13. PV Risk Score
+        df['pv_risk_score'] = (
+            df['dsg_abnormal'] * 3 +
+            df['skin_dominant'] * 2 +
+            df['pain_severity'] * 1
+        )
+
+        # 14. Disease Patterns
+        df['ae_pattern'] = ((df['csf_abnormal'] == 1) & (df['neuro_dominant'] == 1)).astype(int)
+        df['pv_pattern'] = ((df['dsg_abnormal'] == 1) & (df['skin_dominant'] == 1)).astype(int)
+
+        # 15. Spurious marker (for compatibility)
+        if 'spurious_marker' not in df.columns:
+            df['spurious_marker'] = 0
+
+        logger.info(f"✅ Feature Engineering Complete: {df.shape[1]} features for {disease_type}")
         
-        df['spurious_marker'] = 0 
-        
+        df = df.replace([np.inf, -np.inf], np.nan)
+        df = df.fillna(0)
+
         return df
 
-    def _prepare_input_for_model(self, df, model_key, fallback_cols=None):
+    def _prepare_input_for_model(self, df, model_key, disease_type='AE'):
         """
-        Strict feature alignment per model to prevent mismatch errors.
+        FIXED: Disease-aware feature selection
         """
         model = self.models.get(model_key)
-        if not model: return None
+        if not model:
+            return None
 
+        # Try to get features from model
         cols = []
-        
-        # 1. Try to get features from model object
         if hasattr(model, 'feature_names_in_'):
             cols = list(model.feature_names_in_)
-        elif hasattr(model, 'feature_name'): # LightGBM/XGB Booster
+        elif hasattr(model, 'feature_name'):
             cols = model.feature_name()
         
-        # 2. Use fallback if detection failed
-        if not cols and fallback_cols:
-            cols = fallback_cols
-            
-        # 3. If still no columns (e.g., LGBM), just use dataframe as is (risky but necessary)
+        # Use disease-specific fallback
         if not cols:
-            return df
+            if disease_type == 'AE':
+                cols = self.ae_features if model_key == 'rf' else self.ae_features[:15]
+            else:  # PV
+                cols = self.pv_features if model_key == 'xgb' else self.pv_features[:15]
+            logger.warning(f"⚠️ Using {disease_type}-specific fallback for {model_key}")
 
-        # 4. Filter/Order DataFrame
-        for c in cols:
-            if c not in df.columns:
-                df[c] = 0 # Impute missing columns
+        # Filter to available columns
+        available_cols = [c for c in cols if c in df.columns]
+        missing_cols = [c for c in cols if c not in df.columns]
         
-        return df[cols]
+        if missing_cols:
+            logger.warning(f"⚠️ Missing features for {model_key}: {missing_cols[:5]}")
+            # Impute with zeros
+            for c in missing_cols:
+                df[c] = 0
+            available_cols = cols
+
+        return df[available_cols]
 
     def generate_gradcam(self, image_path):
-        if not image_path or not self.cnn_model: return None
+        """
+        FIXED: Only generate GradCAM for HIGH confidence AE predictions
+        """
+        if not image_path or not self.cnn_model:
+            return None
+            
         try:
             img = Image.open(image_path).convert('RGB')
             preprocess = transforms.Compose([
@@ -218,35 +346,36 @@ class HybridAIEngine:
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
             input_tensor = preprocess(img).unsqueeze(0).to(self.device)
-            input_tensor.requires_grad = True
 
-            # Define filename/path first
+            # Get prediction probability
+            with torch.no_grad():
+                output = self.cnn_model(input_tensor)
+                probs = F.softmax(output, dim=1)
+                ae_prob = probs[0][1].item()
+            
+            logger.info(f"🖼️ CNN AE Probability: {ae_prob:.3f}")
+
+            # FIXED: Only generate GradCAM if HIGH confidence (>= 0.60)
+            # This prevents false positive heatmaps on normal MRIs
+            if ae_prob < 0.45:
+                logger.info("   Confidence too low - no GradCAM generated")
+                return None
+
+            # Generate GradCAM for high-confidence predictions
             filename = f"gradcam_{os.path.basename(image_path)}"
             save_path = os.path.join(MEDIA_ROOT, 'grad_cam', filename)
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-            # --- PRE-CHECK: Prediction Probability ---
-            with torch.no_grad():
-                test_out = self.cnn_model(input_tensor)
-                probs = F.softmax(test_out, dim=1)
-                ae_prob = probs[0][1].item()
-            
-            # Prepare original image for saving (opencv format)
-            original_img = cv2.cvtColor(np.array(img.resize((224, 224))), cv2.COLOR_RGB2BGR)
-
-            # If the model is less than 50% sure it's AE, return ORIGINAL IMAGE (Normal)
-            # This fixes "not displaying" while avoiding "red noise"
-            if ae_prob < 0.5:
-                cv2.imwrite(save_path, original_img)
-                return f"/media/grad_cam/{filename}"
-
-            # If AE (High Prob), Generate GradCAM
+            input_tensor.requires_grad = True
             activations = []
             gradients = []
-            def forward_hook(m, i, o): activations.append(o)
-            def backward_hook(m, gi, go): gradients.append(go[0])
+            
+            def forward_hook(m, i, o):
+                activations.append(o)
+            def backward_hook(m, gi, go):
+                gradients.append(go[0])
 
-            target_layer = self.cnn_model.features[-1] 
+            target_layer = self.cnn_model.features[-1]
             h1 = target_layer.register_forward_hook(forward_hook)
             h2 = target_layer.register_full_backward_hook(backward_hook)
 
@@ -254,72 +383,108 @@ class HybridAIEngine:
             self.cnn_model.zero_grad()
             score = output[:, 1]
             score.backward()
-            h1.remove(); h2.remove()
+            
+            h1.remove()
+            h2.remove()
 
             grads = gradients[0].cpu().data.numpy()[0]
             fmaps = activations[0].cpu().data.numpy()[0]
             weights = np.mean(grads, axis=(1, 2))
+            
             cam = np.zeros(fmaps.shape[1:], dtype=np.float32)
-            for i, w in enumerate(weights): cam += w * fmaps[i]
+            for i, w in enumerate(weights):
+                cam += w * fmaps[i]
+            
             cam = np.maximum(cam, 0)
-            if np.max(cam) > 0: cam = cam / np.max(cam)
+            if np.max(cam) > 0:
+                cam = cam / np.max(cam)
             
             heatmap = cv2.resize(cam, (224, 224))
             heatmap = np.uint8(255 * heatmap)
             heatmap_colored = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
             
-            # Superimpose
+            original_img = cv2.cvtColor(np.array(img.resize((224, 224))), cv2.COLOR_RGB2BGR)
             superimposed = cv2.addWeighted(heatmap_colored, 0.4, original_img, 0.6, 0)
             cv2.imwrite(save_path, superimposed)
 
+            logger.info(f"   ✅ GradCAM generated: {save_path}")
             return f"/media/grad_cam/{filename}"
-        except: return None
+            
+        except Exception as e:
+            logger.error(f"❌ GradCAM Error: {e}")
+            traceback.print_exc()
+            return None
 
     def calculate_shap(self, df_processed, is_positive_prediction, disease_type='AE'):
         """
-        Calculates SHAP values dynamically based on Disease Type.
+        FIXED: Disease-specific SHAP with proper feature selection
         """
         try:
-            # 1. Select Explainer & Features based on Disease Type
-            explainer = None
-            cols = []
-            model_key = 'rf'
-
+            # Select explainer and features based on disease
             if disease_type == 'PV' and 'xgb' in self.explainers:
-                # Use XGB for PV as it contains skin/symptom features
                 explainer = self.explainers['xgb']
-                cols = self.xgb_features
                 model_key = 'xgb'
+                logger.info("🔍 Using XGB SHAP for PV")
             elif 'rf' in self.explainers:
-                # Default to RF for AE
                 explainer = self.explainers['rf']
-                cols = self.rf_features_fallback
                 model_key = 'rf'
+                logger.info("🔍 Using RF SHAP for AE")
+            else:
+                logger.warning("⚠️ No SHAP explainer available")
+                return []
 
-            if not explainer: return []
+            # Prepare input with disease-specific features
+            X = self._prepare_input_for_model(df_processed, model_key, disease_type)
+            if X is None or X.empty:
+                logger.warning("⚠️ Failed to prepare SHAP input")
+                return []
 
-            # 2. Prepare Input
-            X = self._prepare_input_for_model(df_processed, model_key, cols)
-            if X is None: return []
+            logger.info(f"   Input shape: {X.shape}, Features: {list(X.columns)[:5]}...")
 
-            # 3. Calculate SHAP
+            # Calculate SHAP
             shap_values = explainer.shap_values(X, check_additivity=False)
             
+            # Extract values for positive class
             sv = None
-            # Handle List output (common in classifiers)
             if isinstance(shap_values, list):
-                idx = 1 if len(shap_values) > 1 else 0
-                sv = shap_values[idx]
+                n_classes = len(shap_values)
+                logger.info(f"   SHAP classes: {n_classes}")
+                sv = shap_values[1] if n_classes > 1 else shap_values[0]
             elif isinstance(shap_values, np.ndarray):
                 sv = shap_values
-            
+
             # Handle dimensions
             if sv is not None:
-                if sv.ndim == 3: sv = sv[0,:,1] if sv.shape[2] > 1 else sv[0,:,0]
-                elif sv.ndim == 2: sv = sv[0] 
-            
-            if sv is None: return []
+                if sv.ndim == 3:
+                    sv = sv[0, :, 1] if sv.shape[2] > 1 else sv[0, :, 0]
+                elif sv.ndim == 2:
+                    sv = sv[0]
 
+            if sv is None:
+                logger.warning("⚠️ Could not extract SHAP values")
+                return []
+
+            # Validate
+            if hasattr(explainer, 'expected_value'):
+                ev = explainer.expected_value
+                if isinstance(ev, (list, np.ndarray)):
+                    ev = ev[1] if len(ev) > 1 else ev[0]
+                try:
+                    ev_val = float(ev)
+                except Exception:
+                    ev_val = None
+
+                try:
+                    sv_sum = float(np.sum(sv))
+                except Exception:
+                    sv_sum = None
+
+                logger.info(
+                    f"   Base value: {ev_val}, SHAP sum: {sv_sum}"
+)
+
+
+            # Extract top features
             feature_names = X.columns.tolist()
             feature_values = X.iloc[0]
             features = []
@@ -327,25 +492,37 @@ class HybridAIEngine:
             indices = np.argsort(np.abs(sv))[::-1][:5]
             
             for idx in indices:
+                if idx >= len(feature_names):
+                    continue
+                    
                 impact = float(sv[idx])
-                if abs(impact) < 0.001: continue
-                
-                # Boundary check
-                if idx >= len(feature_names): continue
+                if abs(impact) < 0.001:
+                    continue
 
                 name = str(feature_names[idx])
                 val = feature_values.iloc[idx]
                 
+                # Determine direction
                 direction = "Increased Risk" if impact > 0 else "Decreased Risk"
                 
-                # --- CLINICAL OVERRIDE FOR UI CLARITY (WITH MEDICAL THRESHOLDS) ---
-                # Only force "Increased Risk" if the value is actually medically abnormal
-                
-                if name == 'dsg1_index' and val > 20: direction = "Increased Risk"
-                elif name == 'dsg3_index' and val > 20: direction = "Increased Risk"
-                elif name == 'csf_protein' and val > 45: direction = "Increased Risk"
-                elif name == 'csf_cells' and val > 5: direction = "Increased Risk"
-                elif name in ['mucosal_ulcers', 'skin_blisters', 'seizures'] and val > 0: direction = "Increased Risk"
+                # Apply medical thresholds
+                if disease_type == 'AE':
+                    if name in ['csf_protein'] and val > 45:
+                        direction = "Increased Risk"
+                    elif name in ['csf_cells'] and val > 5:
+                        direction = "Increased Risk"
+                    elif name in ['seizures', 'memory_loss', 'psychiatric_symptoms'] and val > 0:
+                        direction = "Increased Risk"
+                    elif name in ['antibody_titer'] and val > 60:
+                        direction = "Increased Risk"
+                        
+                elif disease_type == 'PV':
+                    if name in ['dsg1_index'] and val > 20:
+                        direction = "Increased Risk"
+                    elif name in ['dsg3_index'] and val > 20:
+                        direction = "Increased Risk"
+                    elif name in ['skin_blisters', 'mucosal_ulcers'] and val > 0:
+                        direction = "Increased Risk"
 
                 features.append({
                     "label": name,
@@ -354,168 +531,230 @@ class HybridAIEngine:
                     "raw_input": f"{val:.2f}",
                     "direction": direction
                 })
-            
+
+            logger.info(f"   ✅ Extracted {len(features)} SHAP features")
             return features
+            
         except Exception as e:
-            print(f"⚠️ SHAP Calculation Error: {e}")
+            logger.error(f"❌ SHAP Error: {e}")
+            traceback.print_exc()
             return []
 
     def generate_explanation(self, result, confidence, df, disease_type):
+        """Generate human-readable explanation with disease-specific logic"""
         if result == "Normal":
             return f"The AI analysis indicates a {confidence}% probability of Normal status."
+            
         row = df.iloc[0]
         reasons = []
+        
         if disease_type == 'AE':
-            if row['csf_protein'] > 45: reasons.append(f"high CSF protein ({row['csf_protein']} mg/dL)")
-            if row['seizures'] == 1: reasons.append("seizure activity")
+            if row['csf_protein'] > 45:
+                reasons.append(f"elevated CSF protein ({row['csf_protein']:.1f} mg/dL, normal <45)")
+            if row['csf_cells'] > 5:
+                reasons.append(f"elevated CSF cells ({row['csf_cells']:.0f}, normal <5)")
+            if row['seizures'] == 1:
+                reasons.append("seizure activity present")
+            if row['memory_loss'] == 1:
+                reasons.append("memory impairment")
+            if row['antibody_titer'] > 60:
+                reasons.append(f"elevated antibodies ({row['antibody_titer']:.0f})")
+            if row['mri_abnormal'] == 1 or row['eeg_abnormal'] == 1:
+                reasons.append("abnormal brain imaging")
+                
         elif disease_type == 'PV':
-            if row['dsg1_index'] > 20: reasons.append(f"elevated Dsg1 ({row['dsg1_index']})")
-            if row['dsg3_index'] > 20: reasons.append(f"elevated Dsg3 ({row['dsg3_index']})")
+            if row['dsg1_index'] > 20:
+                reasons.append(f"elevated Dsg1 antibodies ({row['dsg1_index']:.1f}, normal <20)")
+            if row['dsg3_index'] > 20:
+                reasons.append(f"elevated Dsg3 antibodies ({row['dsg3_index']:.1f}, normal <20)")
+            if row['skin_blisters'] == 1:
+                reasons.append("skin blistering present")
+            if row['mucosal_ulcers'] == 1:
+                reasons.append("mucosal ulceration present")
+            if row['pain_score'] > 5:
+                reasons.append(f"significant pain (score {row['pain_score']}/10)")
+                
         reason_str = ", ".join(reasons) if reasons else "clinical pattern matching"
-        return f"The model predicts {result} ({confidence}% risk score) driven by {reason_str}."
+        return f"The model predicts {result} ({confidence}% confidence) based on {reason_str}."
 
     def calibrate_prediction(self, ml_prob, df, disease_type):
         """
-        Clinical Guardrail - Overrides AI if biomarkers are definitively high.
+        Clinical calibration with logging
         """
         row = df.iloc[0]
         clinical_conf = 0
+        reasons = []
         
         if disease_type == 'AE':
-            if row['csf_protein'] > 45: clinical_conf += 35
-            if row['seizures'] == 1: clinical_conf += 25
-            if row['memory_loss'] == 1: clinical_conf += 20
+            if row['csf_protein'] > 45:
+                clinical_conf += 35
+                reasons.append(f"CSF protein {row['csf_protein']:.1f} > 45")
+            if row['csf_cells'] > 5:
+                clinical_conf += 25
+                reasons.append(f"CSF cells {row['csf_cells']:.0f} > 5")
+            if row['seizures'] == 1:
+                clinical_conf += 25
+                reasons.append("Seizures present")
+            if row['memory_loss'] == 1:
+                clinical_conf += 20
+                reasons.append("Memory loss present")
+            if row['antibody_titer'] > 60:
+                clinical_conf += 15
+                reasons.append(f"Antibodies {row['antibody_titer']:.0f} > 60")
+                
         elif disease_type == 'PV':
-            # PV is driven heavily by Dsg1/Dsg3
-            if row['dsg1_index'] > 20: clinical_conf += 50
-            if row['dsg3_index'] > 20: clinical_conf += 30
-            if row['skin_blisters'] == 1: clinical_conf += 30
-            if row['mucosal_ulcers'] == 1: clinical_conf += 20
-        
+            if row['dsg1_index'] > 20:
+                clinical_conf += 50
+                reasons.append(f"Dsg1 {row['dsg1_index']:.1f} > 20")
+            if row['dsg3_index'] > 20:
+                clinical_conf += 30
+                reasons.append(f"Dsg3 {row['dsg3_index']:.1f} > 20")
+            if row['skin_blisters'] == 1:
+                clinical_conf += 30
+                reasons.append("Skin blisters present")
+            if row['mucosal_ulcers'] == 1:
+                clinical_conf += 20
+                reasons.append("Mucosal ulcers present")
+
         if clinical_conf > 0:
-             # If clinical signs are present, ensure we don't return < 0.5 if signs are strong
-             # Normalize clinical_conf to max 0.99
-             clinical_prob = min(0.99, clinical_conf / 100.0)
-             
-             # If clinical_conf is very high (>50), force the probability to be at least that high
-             if clinical_conf >= 50:
-                 return max(ml_prob, clinical_prob)
-             
-             # Otherwise, blend them
-             return max(ml_prob, clinical_prob)
-             
+            clinical_prob = min(0.99, clinical_conf / 100.0)
+            logger.info(f"🏥 Clinical Calibration: score={clinical_conf}, reasons={reasons}")
+            
+            if clinical_conf >= 50:
+                calibrated = max(ml_prob, clinical_prob)
+                if calibrated > ml_prob:
+                    logger.info(f"   ⚠️ OVERRIDE: {ml_prob:.3f} → {calibrated:.3f}")
+                return calibrated
+            
+            return max(ml_prob, clinical_prob * 0.7)
+            
         return ml_prob
 
     def predict(self, clinical_data, mri_path=None, disease_type='AE'):
-        print(f"📥 Pipeline: {disease_type}")
+        """
+        FIXED: Complete prediction pipeline with proper disease handling
+        """
+        logger.info(f"\n{'='*70}")
+        logger.info(f"🔬 Prediction Pipeline: {disease_type}")
+        logger.info(f"{'='*70}")
+        logger.info(f"MRI provided: {mri_path is not None}")
+
+        # Prepare data
         df = pd.DataFrame([clinical_data])
         df = df.apply(pd.to_numeric, errors='coerce').fillna(0)
-        df_processed = self.engineer_features(df)
+        
+        # FIXED: Pass disease_type to feature engineering
+        df_processed = self.engineer_features(df, disease_type=disease_type)
+        
+        logger.info(f"📋 Engineered features: {df_processed.shape[1]}")
 
-        ml_result = "Normal"
+        # Base model predictions
         ml_prob = 0.0
         
         try:
-            # --- 1. PREDICT: RANDOM FOREST ---
-            rf_probs = np.array([0.5, 0.5]) # Default
-            rf_final_prob = 0.5
-            
+            # RF prediction
+            rf_prob = 0.5
             if 'rf' in self.models:
-                X_rf = self._prepare_input_for_model(df_processed, 'rf', self.rf_features_fallback)
-                rf_raw = self.models['rf'].predict_proba(X_rf) # Shape (1, n_classes)
-                rf_probs = rf_raw[0] # Shape (n_classes,)
-                rf_final_prob = rf_probs[1] if len(rf_probs) > 1 else rf_probs[0]
+                X_rf = self._prepare_input_for_model(df_processed, 'rf', disease_type)
+                if X_rf is not None:
+                    rf_probs = self.models['rf'].predict_proba(X_rf)[0]
+                    rf_prob = rf_probs[1] if len(rf_probs) > 1 else rf_probs[0]
+                    logger.info(f"   RF: {rf_prob:.3f}")
 
-            # --- 2. PREDICT: XGBOOST ---
-            xgb_probs = rf_probs # Fallback
-            xgb_final_prob = rf_final_prob
-            
+            # XGB prediction
+            xgb_prob = rf_prob
             if 'xgb' in self.models:
-                # Use strict XGB features from log
-                X_xgb = self._prepare_input_for_model(df_processed, 'xgb', self.xgb_features)
-                try:
-                    # Sklearn wrapper
-                    xgb_raw = self.models['xgb'].predict_proba(X_xgb)
-                    xgb_probs = xgb_raw[0]
-                    xgb_final_prob = xgb_probs[1] if len(xgb_probs) > 1 else xgb_probs[0]
-                except AttributeError:
-                    # Native Booster
-                    dmatrix = xgb.DMatrix(X_xgb)
-                    pred = float(self.models['xgb'].predict(dmatrix)[0])
-                    # Native usually returns single float for binary
-                    xgb_probs = np.array([1-pred, pred]) 
-                    xgb_final_prob = pred
+                X_xgb = self._prepare_input_for_model(df_processed, 'xgb', disease_type)
+                if X_xgb is not None:
+                    try:
+                        xgb_probs = self.models['xgb'].predict_proba(X_xgb)[0]
+                        xgb_prob = xgb_probs[1] if len(xgb_probs) > 1 else xgb_probs[0]
+                    except AttributeError:
+                        dmatrix = xgb.DMatrix(X_xgb)
+                        xgb_prob = float(self.models['xgb'].predict(dmatrix)[0])
+                    logger.info(f"   XGB: {xgb_prob:.3f}")
 
-            # --- 3. PREDICT: LIGHTGBM ---
-            lgb_probs = rf_probs # Fallback
-            lgb_final_prob = rf_final_prob
-            
+            # LGB prediction
+            lgb_prob = rf_prob
             if 'lgbm' in self.models:
-                # Try to auto-detect LGBM features (likely different from XGB/RF)
-                # If auto-detect fails, we pass df_processed; LGBM might select cols by name or index
-                X_lgb = self._prepare_input_for_model(df_processed, 'lgbm', None)
-                
-                try:
-                    # Sklearn wrapper
-                    lgb_raw = self.models['lgbm'].predict_proba(X_lgb)
-                    lgb_probs = lgb_raw[0]
-                    lgb_final_prob = lgb_probs[1] if len(lgb_probs) > 1 else lgb_probs[0]
-                except AttributeError:
-                    # Native Booster
-                    pred = float(self.models['lgbm'].predict(X_lgb)[0])
-                    lgb_probs = np.array([1-pred, pred])
-                    lgb_final_prob = pred
+                X_lgb = self._prepare_input_for_model(df_processed, 'lgbm', disease_type)
+                if X_lgb is not None:
+                    try:
+                        lgb_probs = self.models['lgbm'].predict_proba(X_lgb)[0]
+                        lgb_prob = lgb_probs[1] if len(lgb_probs) > 1 else lgb_probs[0]
+                    except AttributeError:
+                        lgb_prob = float(self.models['lgbm'].predict(X_lgb)[0])
+                    logger.info(f"   LGB: {lgb_prob:.3f}")
 
-            print(f"📊 Bases: RF={rf_final_prob:.2f}, XGB={xgb_final_prob:.2f}, LGB={lgb_final_prob:.2f}")
-
-            # --- 4. META LEARNER (STACKING) ---
+            # Ensemble
             if 'meta' in self.models:
-                # ERROR FIX: "Expecting 9 features"
-                # This implies 3 models x 3 classes (Normal, AE, PV) = 9 features
-                # We concatenate the full probability vectors
-                
-                # Check dimensions to ensure we have enough data to fill 9 slots if needed
-                # If binary (2 classes), we might need to pad or the meta model expects something else
-                # But given the error "X has 3 features... expecting 9", concatenating vectors is the standard fix
-                
-                stack_input = np.concatenate([rf_probs, xgb_probs, lgb_probs])
-                
-                # Reshape for single sample prediction: (1, 9)
-                stack_input = stack_input.reshape(1, -1)
-                
-                # Determine prob from meta
-                meta_raw = self.models['meta'].predict_proba(stack_input)[0]
-                ml_prob = meta_raw[1] if len(meta_raw) > 1 else meta_raw[0]
+                try:
+                    # Assuming binary classification for meta
+                    rf_probs_full = np.array([1-rf_prob, rf_prob])
+                    xgb_probs_full = np.array([1-xgb_prob, xgb_prob])
+                    lgb_probs_full = np.array([1-lgb_prob, lgb_prob])
+                    
+                    
+                    stack_input = np.concatenate([rf_probs_full, xgb_probs_full, lgb_probs_full,  np.zeros(3)])
+                    stack_input = stack_input.reshape(1, -1)
+                    
+                    meta_probs = self.models['meta'].predict_proba(stack_input)[0]
+                    ml_prob = meta_probs[1] if len(meta_probs) > 1 else meta_probs[0]
+                    logger.info(f"   Meta: {ml_prob:.3f}")
+                except Exception as e:
+                    logger.warning(f"Meta-learner failed: {e}, using average")
+                    ml_prob = (rf_prob + xgb_prob + lgb_prob) / 3.0
             else:
-                ml_prob = (rf_final_prob + xgb_final_prob + lgb_final_prob) / 3.0
+                ml_prob = (rf_prob + xgb_prob + lgb_prob) / 3.0
+                logger.info(f"   Average: {ml_prob:.3f}")
 
         except Exception as e:
-            print(f"❌ Stack Error: {e}")
+            logger.error(f"❌ Prediction Error: {e}")
             traceback.print_exc()
-            ml_prob = 0.0
+            ml_prob = 0.5
 
-        # Calibration
+        # Clinical calibration
         ml_prob = self.calibrate_prediction(ml_prob, df_processed, disease_type)
+        logger.info(f"📊 After calibration: {ml_prob:.3f}")
 
-        # Fusion
+        # CNN fusion (AE only, and only if MRI provided)
         cnn_prob = 0.0
         grad_cam_url = None
+        
+        # FIXED: Only process MRI if actually provided and for AE
         if disease_type == 'AE' and mri_path and self.cnn_model:
             try:
                 img = Image.open(mri_path).convert('RGB')
-                preprocess = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-                output = self.cnn_model(preprocess(img).unsqueeze(0).to(self.device))
-                cnn_prob = F.softmax(output, dim=1)[0][1].item()
+                preprocess = transforms.Compose([
+                    transforms.Resize((224, 224)),
+                    transforms.ToTensor(),
+                    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ])
+                
+                with torch.no_grad():
+                    output = self.cnn_model(preprocess(img).unsqueeze(0).to(self.device))
+                    cnn_prob = F.softmax(output, dim=1)[0][1].item()
+                
+                logger.info(f"🧠 CNN: {cnn_prob:.3f}")
+                
+                # Generate GradCAM (only if high confidence)
                 grad_cam_url = self.generate_gradcam(mri_path)
-            except: pass
+                
+            except Exception as e:
+                logger.error(f"❌ CNN Error: {e}")
+                traceback.print_exc()
 
-        if disease_type == 'AE' and mri_path:
+        # Final fusion
+        if disease_type == 'AE' and cnn_prob > 0:
             final_prob = (ml_prob * 0.7) + (cnn_prob * 0.3)
+            logger.info(f"🔬 Fused: ML({ml_prob:.3f}) + CNN({cnn_prob:.3f}) = {final_prob:.3f}")
         else:
             final_prob = ml_prob
+            logger.info(f"🔬 Final: {final_prob:.3f} (tabular only)")
 
-        # Result
+        # Determine result
         final_conf = round(final_prob * 100, 2)
+        
         if final_prob > 0.5:
             ml_result = "Autoimmune Encephalitis (AE)" if disease_type == 'AE' else "Pemphigus Vulgaris (PV)"
             is_positive = True
@@ -525,8 +764,12 @@ class HybridAIEngine:
             is_positive = False
 
         final_conf = max(5.0, min(95.0, final_conf))
-        print(f"🤖 Final: {ml_result} ({final_conf}%)")
+        
+        logger.info(f"\n{'='*70}")
+        logger.info(f"✅ RESULT: {ml_result} ({final_conf}%)")
+        logger.info(f"{'='*70}\n")
 
+        # Generate explanations
         shap_data = self.calculate_shap(df_processed, is_positive, disease_type)
         explanation = self.generate_explanation(ml_result, final_conf, df_processed, disease_type)
         
@@ -539,5 +782,9 @@ class HybridAIEngine:
             "full_data": df_processed.iloc[0].to_dict()
         }
 
-    def predict_pv_ensemble(self, data): return self.predict(data, disease_type='PV')
-    def predict_ae_fusion(self, data, mri): return self.predict(data, mri_path=mri, disease_type='AE')
+    # Convenience methods
+    def predict_pv_ensemble(self, data):
+        return self.predict(data, disease_type='PV')
+    
+    def predict_ae_fusion(self, data, mri):
+        return self.predict(data, mri_path=mri, disease_type='AE')
