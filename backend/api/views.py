@@ -645,22 +645,6 @@ def verify_diagnosis(request, session_id):
     session.save()
     return Response({"status": "success", "message": "Diagnosis verified"})
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_doctor_appointments(request):
-    appointments = Appointment.objects.filter(doctor=request.user).order_by('date_time')
-    data = []
-    for apt in appointments:
-        data.append({
-            "id": apt.id,
-            "patient_name": f"{apt.patient.first_name} {apt.patient.last_name}",
-            "patient_id": apt.patient.id,
-            "date": apt.date_time.strftime("%Y-%m-%d"),
-            "time": apt.date_time.strftime("%H:%M"),
-            "status": apt.status,
-            "meet_link": apt.meet_link
-        })
-    return Response(data)
 
 # ==========================================
 # 4. MESSAGING & VIDEO ENDPOINTS
